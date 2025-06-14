@@ -2,106 +2,201 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Pigpen + Caesar Decoder Lab</title>
+  <title>Pigpen + Caesar Decoder Lab</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Tailwind (via CDN so you don’t need any build tools) -->
+  <!-- Tailwind – CDN so you don’t need a build step -->
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <!-- Optional: OpenCV for template‑matching (huge file, but it lets us do basic image processing in the browser) -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
   <style>
-    body{font-family:"Courier New",monospace}
+    body{font-family:Courier,monospace}
+    canvas{max-width:100%}
   </style>
 </head>
-<body class="bg-gradient-to-br from-gray-900 via-purple-700 to-indigo-900 text-white min-h-screen flex flex-col items-center">
-  <h1 class="text-4xl font-bold mt-6">Pigpen + Caesar Decoder Lab</h1>
-  <p class="mt-2 text-lg text-center max-w-xl px-2">This page lets you practise cracking Pigpen ciphers. <strong>Step 1</strong> – convert each symbol to its letter using the Pigpen chart. <strong>Step 2</strong> – use the Caesar‑shift tools below to reveal the message.</p>
+<body class="bg-gradient-to-br from-gray-900 via-purple-700 to-indigo-900 text-white min-h-screen flex flex-col items-center pb-20">
+  <h1 class="text-4xl font-bold mt-6">Pigpen + Caesar Decoder Lab</h1>
+  <p class="mt-2 text-lg text-center max-w-xl px-2">New beta feature below will try to read a screenshot of your worksheet and turn those little <span class="italic">pigpen</span> symbols into letters automatically. It’s not perfect, but it’s a fun intro to computer vision!</p>
 
+  <!-- ===================== 0.  UPLOAD / OCR  ===================== -->
   <div class="w-full max-w-3xl mt-10 px-4">
-    <!-- INPUT -->
-    <label class="block mb-2 font-semibold">Step 1 – Paste the letters you got from Pigpen:</label>
-    <textarea id="cipher" rows="3" class="w-full p-3 rounded-lg text-gray-900" placeholder="e.g. FRQJUDWV!"></textarea>
+    <h2 class="text-2xl font-bold mb-3">Step 0 – Upload your pigpen image (optional but cool)</h2>
+    <input type="file" id="imgInput" accept="image/*" class="block text-black bg-white rounded p-2">
+    <canvas id="imgCanvas" class="border border-gray-500 mt-4"></canvas>
 
-    <!-- CONTROLS -->
-    <div class="mt-6 flex flex-col sm:flex-row sm:items-center sm:space-x-6">
-      <div class="flex-1">
-        <label class="block mb-2 font-semibold">Step 2 – Choose shift (<span id="shiftValue">0</span>)</label>
-        <input id="shift" type="range" min="0" max="25" value="0" class="w-full">
-      </div>
-      <button id="decodeBtn" class="mt-6 sm:mt-0 bg-emerald-400 hover:bg-emerald-500 text-black font-bold py-3 px-6 rounded-xl shadow-lg transition-all">Decode ➜</button>
+    <div class="mt-4 flex flex-wrap items-end gap-4">
+      <label class="text-sm">Cell size (px)
+        <input id="cellSize" type="number" value="48" min="20" class="text-black w-20 ml-2 p-1 rounded">
+      </label>
+      <button id="autoBtn" class="bg-sky-300 hover:bg-sky-400 text-black font-semibold py-2 px-4 rounded-lg shadow-lg disabled:opacity-40">Auto‑convert ➜
+      </button>
+      <span id="autoStatus" class="text-sm italic"></span>
     </div>
-
-    <!-- OUTPUT -->
-    <div class="mt-8">
-      <label class="block mb-2 font-semibold">Output:</label>
-      <textarea id="output" rows="3" class="w-full p-3 rounded-lg text-gray-900" readonly></textarea>
-    </div>
-
-    <!-- FREQUENCY ANALYSIS -->
-    <div class="mt-10">
-      <h2 class="text-2xl font-bold mb-2">Need a hint?</h2>
-      <button id="freqBtn" class="bg-pink-300 hover:bg-pink-400 text-black font-semibold py-2 px-4 rounded-lg shadow">Run frequency analysis</button>
-      <pre id="freqResults" class="mt-4 whitespace-pre-wrap"></pre>
-    </div>
+    <p class="text-xs text-gray-300 mt-1">Tip: adjust the cell size slider until the grid squares in the preview roughly match each symbol.</p>
   </div>
 
-  <script>
-    const inputEl = document.getElementById('cipher');
-    const shiftEl = document.getElementById('shift');
-    const shiftValue = document.getElementById('shiftValue');
-    const outputEl = document.getElementById('output');
-    const decodeBtn = document.getElementById('decodeBtn');
-    const freqBtn = document.getElementById('freqBtn');
-    const freqResults = document.getElementById('freqResults');
+  <!-- ===================== 1.  MANUAL LETTERS  ===================== -->
+  <div class="w-full max-w-3xl mt-14 px-4">
+    <label class="block mb-2 font-semibold">Step 1 – Paste (or auto‑fill) the letters you got from Pigpen:</label>
+    <textarea id="cipher" rows="3" class="w-full p-3 rounded-lg text-gray-900" placeholder="e.g. FRQJUDWV!"></textarea>
+  </div>
 
-    function caesarDecode(text, shift) {
-      const A = 'A'.charCodeAt(0);
-      return [...text.toUpperCase()].map(ch => {
-        const code = ch.charCodeAt(0);
-        if (code >= 65 && code <= 90) {
-          const pos = (code - A - shift + 26) % 26;
-          return String.fromCharCode(A + pos);
-        }
-        return ch; // keep punctuation & spaces
-      }).join('');
+  <!-- ===================== 2.  CAESAR CONTROLS  ===================== -->
+  <div class="w-full max-w-3xl px-4 mt-10 flex flex-col sm:flex-row sm:items-center sm:space-x-6">
+    <div class="flex-1">
+      <label class="block mb-2 font-semibold">Step 2 – Choose shift (<span id="shiftValue">0</span>)</label>
+      <input id="shift" type="range" min="0" max="25" value="0" class="w-full">
+    </div>
+    <button id="decodeBtn" class="mt-6 sm:mt-0 bg-emerald-400 hover:bg-emerald-500 text-black font-bold py-3 px-6 rounded-xl shadow-lg transition-all">Decode ➜</button>
+  </div>
+
+  <!-- ===================== 3.  OUTPUT  ===================== -->
+  <div class="w-full max-w-3xl px-4 mt-8">
+    <label class="block mb-2 font-semibold">Output:</label>
+    <textarea id="output" rows="3" class="w-full p-3 rounded-lg text-gray-900" readonly></textarea>
+  </div>
+
+  <!-- ===================== 4.  FREQUENCY  ===================== -->
+  <div class="w-full max-w-3xl px-4 mt-10">
+    <h2 class="text-2xl font-bold mb-2">Need a hint?</h2>
+    <button id="freqBtn" class="bg-pink-300 hover:bg-pink-400 text-black font-semibold py-2 px-4 rounded-lg shadow">Run frequency analysis</button>
+    <pre id="freqResults" class="mt-4 whitespace-pre-wrap"></pre>
+  </div>
+
+<!-- ===================== SCRIPT ===================== -->
+<script>
+// ================== CAESAR CORE =====================
+const inputEl   = document.getElementById('cipher');
+const shiftEl   = document.getElementById('shift');
+const shiftVal  = document.getElementById('shiftValue');
+const outputEl  = document.getElementById('output');
+const decodeBtn = document.getElementById('decodeBtn');
+const freqBtn   = document.getElementById('freqBtn');
+const freqOut   = document.getElementById('freqResults');
+
+function caesarDecode(txt, s){
+  const A = 65;
+  return [...txt.toUpperCase()].map(ch=>{
+    const c = ch.charCodeAt(0);
+    if(c>=65 && c<=90){
+      return String.fromCharCode(A + (c - A - s + 26) % 26);
     }
+    return ch;
+  }).join('');
+}
+function doDecode(){outputEl.value = caesarDecode(inputEl.value, +shiftEl.value)}
+function frequency(txt){
+  const cnt=Array(26).fill(0);
+  for(const ch of txt.toUpperCase()){
+    const c=ch.charCodeAt(0); if(c>=65&&c<=90) cnt[c-65]++;}
+  return cnt;
+}
+function showFreq(){
+  const counts=frequency(inputEl.value);
+  const letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const pairs=letters.map((l,i)=>({l,count:counts[i]})).filter(p=>p.count>0)
+                     .sort((a,b)=>b.count-a.count);
+  if(!pairs.length){freqOut.textContent='No letters yet';return;}
+  const assumedE=4; // index of E
+  const guessShift=(pairs[0].l.charCodeAt(0)-65-assumedE+26)%26;
+  freqOut.textContent=pairs.map(p=>`${p.l}: ${p.count}`).join('\n')+
+      `\n\n🤖 Guess: try shift ${guessShift}`;
+}
+shiftEl.addEventListener('input',()=>{shiftVal.textContent=shiftEl.value;doDecode()});
+decodeBtn.addEventListener('click',doDecode);
+freqBtn.addEventListener('click',showFreq);
 
-    function doDecode() {
-      const shift = parseInt(shiftEl.value, 10);
-      outputEl.value = caesarDecode(inputEl.value, shift);
+// ================== PIGPEN OCR (BETA) =====================
+const imgInput  = document.getElementById('imgInput');
+const imgCanvas = document.getElementById('imgCanvas');
+const cellSizeEl= document.getElementById('cellSize');
+const autoBtn   = document.getElementById('autoBtn');
+const autoStatus= document.getElementById('autoStatus');
+let imgCtx, w, h;
+const templateCache={};
+
+imgInput.addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const img=new Image();
+  img.onload=()=>{
+    w=img.width; h=img.height;
+    imgCanvas.width=w; imgCanvas.height=h;
+    imgCtx=imgCanvas.getContext('2d');
+    imgCtx.drawImage(img,0,0);
+    autoBtn.disabled=false;
+  };
+  img.src=URL.createObjectURL(file);
+});
+
+autoBtn.addEventListener('click',()=>{
+  if(!imgCtx) return alert('Upload image first');
+  const size=parseInt(cellSizeEl.value,10);
+  const rows=Math.floor(h/size);
+  const cols=Math.floor(w/size);
+  let letters='';
+  autoStatus.textContent='(crunching …)';
+  // loop over each cell
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const data=imgCtx.getImageData(c*size,r*size,size,size);
+      const l=guessLetter(data,size);
+      letters+=l;
     }
+    letters+=' ';
+  }
+  inputEl.value=letters.trim();
+  doDecode();
+  autoStatus.textContent='(done – check & tweak!)';
+});
 
-    function frequency(text) {
-      const counts = Array(26).fill(0);
-      [...text.toUpperCase()].forEach(ch => {
-        const code = ch.charCodeAt(0);
-        if (code >= 65 && code <= 90) counts[code - 65]++;
-      });
-      return counts;
-    }
+function guessLetter(imgData,size){
+  let bestDiff=1e12,bestIdx=-1;
+  for(let i=0;i<18;i++){ // we only template A–R for now (0‑17)
+    const tmpl=getTemplate(i,size);
+    const diff=compare(imgData,tmpl);
+    if(diff<bestDiff){bestDiff=diff;bestIdx=i;}
+  }
+  return bestIdx===-1?'?':String.fromCharCode(65+bestIdx);
+}
 
-    function showFreq() {
-      const counts = frequency(inputEl.value);
-      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-      const pairs = letters.map((l,i)=>({l, count: counts[i]}));
-      pairs.sort((a,b)=>b.count-a.count);
-      const most = pairs[0];
-      let guessShift = null;
-      if (most.count > 0) {
-        const assumedEIndex = 'E'.charCodeAt(0) - 65;
-        guessShift = (most.l.charCodeAt(0) - 65 - assumedEIndex + 26) % 26;
-      }
-      let lines = pairs.filter(p=>p.count>0).map(p=>`${p.l}: ${p.count}`).join('\n');
-      if (guessShift !== null) {
-        lines += `\n\n🤖 My best guess: try shift ${guessShift}`;
-      }
-      freqResults.textContent = lines || 'No letters to analyse yet!';
-    }
+function getTemplate(idx,size){
+  const key=idx+'_'+size;
+  if(templateCache[key]) return templateCache[key];
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=size;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='white'; ctx.fillRect(0,0,size,size);
+  ctx.strokeStyle='black'; ctx.lineWidth=Math.max(2,Math.round(size*0.12));
+  const m=ctx.lineWidth/2;
 
-    // hook up events
-    shiftEl.addEventListener('input', () => {
-      shiftValue.textContent = shiftEl.value;
-      doDecode(); // live preview
-    });
-    decodeBtn.addEventListener('click', doDecode);
-    freqBtn.addEventListener('click', showFreq);
-  </script>
+  const drawLines=(top,right,bottom,left)=>{
+    ctx.beginPath();
+    if(top)   {ctx.moveTo(m,m); ctx.lineTo(size-m,m);} // top
+    if(right) {ctx.moveTo(size-m,m); ctx.lineTo(size-m,size-m);} // right
+    if(bottom){ctx.moveTo(m,size-m); ctx.lineTo(size-m,size-m);} // bottom
+    if(left)  {ctx.moveTo(m,m); ctx.lineTo(m,size-m);} // left
+    ctx.stroke();
+  };
+
+  if(idx<9){ // A–I without dot
+    const pos=idx; const row=Math.floor(pos/3),col=pos%3;
+    drawLines(row===0,col===2,row===2,col===0);
+  }else{ // J–R with dot + same pos
+    const pos=idx-9; const row=Math.floor(pos/3),col=pos%3;
+    drawLines(row===0,col===2,row===2,col===0);
+    // dot
+    ctx.beginPath(); ctx.arc(size/2,size/2,size*0.1,0,Math.PI*2); ctx.fillStyle='black'; ctx.fill();
+  }
+  // store ImageData
+  const data=ctx.getImageData(0,0,size,size);
+  templateCache[key]=data; return data;
+}
+
+function compare(a,b){ // simple pixel diff – sample every 4th pixel for speed
+  let diff=0;
+  for(let i=0;i<a.data.length;i+=16){ diff+=Math.abs(a.data[i]-b.data[i]); }
+  return diff;
+}
+</script>
 </body>
 </html>
