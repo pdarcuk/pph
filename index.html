@@ -1,141 +1,107 @@
-!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pigpen Helper (Web)</title>
+  <meta charset="UTF-8">
+  <title>Pigpen + Caesar Decoder Lab</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Tailwind (via CDN so you don’t need any build tools) -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      max-width: 700px;
-      margin: auto;
-      padding: 1.5rem;
-      line-height: 1.5;
-    }
-    textarea {
-      width: 100%;
-      height: 120px;
-      font-family: monospace;
-      padding: 0.5rem;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-    }
-    output {
-      display: block;
-      white-space: pre-wrap;
-      background: #f5f5f5;
-      padding: 1rem;
-      margin-top: 1rem;
-      border-radius: 8px;
-      min-height: 60px;
-    }
-    label {
-      display: block;
-      margin-top: 1rem;
-      font-weight: 600;
-    }
-    .hidden {
-      display: none;
-    }
-    button {
-      margin-top: 1rem;
-      padding: 0.6rem 1rem;
-      font-size: 1rem;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      background: #2d81ff;
-      color: #fff;
-    }
-    button:hover {
-      background: #1c5ed6;
-    }
+    body{font-family:"Courier New",monospace}
   </style>
 </head>
-<body>
-  <h1>Pigpen Helper (Web)</h1>
-  <p>Pick a mode, type your text, and press <strong>Run</strong>.</p>
+<body class="bg-gradient-to-br from-gray-900 via-purple-700 to-indigo-900 text-white min-h-screen flex flex-col items-center">
+  <h1 class="text-4xl font-bold mt-6">Pigpen + Caesar Decoder Lab</h1>
+  <p class="mt-2 text-lg text-center max-w-xl px-2">This page lets you practise cracking Pigpen ciphers. <strong>Step 1</strong> – convert each symbol to its letter using the Pigpen chart. <strong>Step 2</strong> – use the Caesar‑shift tools below to reveal the message.</p>
 
-  <label>
-    Mode:
-    <select id="mode">
-      <option value="encode">Encode to Pigpen</option>
-      <option value="decode">Decode from Pigpen</option>
-      <option value="decodeShift">Decode + Caesar shift</option>
-    </select>
-  </label>
+  <div class="w-full max-w-3xl mt-10 px-4">
+    <!-- INPUT -->
+    <label class="block mb-2 font-semibold">Step 1 – Paste the letters you got from Pigpen:</label>
+    <textarea id="cipher" rows="3" class="w-full p-3 rounded-lg text-gray-900" placeholder="e.g. FRQJUDWV!"></textarea>
 
-  <label id="shiftLabel" class="hidden">
-    Caesar shift (N):
-    <input type="number" id="shift" value="3" style="width:4rem;" />
-  </label>
+    <!-- CONTROLS -->
+    <div class="mt-6 flex flex-col sm:flex-row sm:items-center sm:space-x-6">
+      <div class="flex-1">
+        <label class="block mb-2 font-semibold">Step 2 – Choose shift (<span id="shiftValue">0</span>)</label>
+        <input id="shift" type="range" min="0" max="25" value="0" class="w-full">
+      </div>
+      <button id="decodeBtn" class="mt-6 sm:mt-0 bg-emerald-400 hover:bg-emerald-500 text-black font-bold py-3 px-6 rounded-xl shadow-lg transition-all">Decode ➜</button>
+    </div>
 
-  <label>
-    Input:
-    <textarea id="input"></textarea>
-  </label>
+    <!-- OUTPUT -->
+    <div class="mt-8">
+      <label class="block mb-2 font-semibold">Output:</label>
+      <textarea id="output" rows="3" class="w-full p-3 rounded-lg text-gray-900" readonly></textarea>
+    </div>
 
-  <button id="run">Run</button>
-
-  <output id="out"></output>
+    <!-- FREQUENCY ANALYSIS -->
+    <div class="mt-10">
+      <h2 class="text-2xl font-bold mb-2">Need a hint?</h2>
+      <button id="freqBtn" class="bg-pink-300 hover:bg-pink-400 text-black font-semibold py-2 px-4 rounded-lg shadow">Run frequency analysis</button>
+      <pre id="freqResults" class="mt-4 whitespace-pre-wrap"></pre>
+    </div>
+  </div>
 
   <script>
-    /*
-      Quick‑start Pigpen mapping. These are **placeholder** symbols (circled letters)
-      so the tool runs out‑of‑the‑box in any browser. Replace each value with the
-      actual Pigpen glyphs, SVG paths, or an imported Pigpen font when you’re ready.
-    */
-    const pigpen = {
-      'A':'🅐','B':'🅑','C':'🅒','D':'🅓','E':'🅔','F':'🅕','G':'🅖','H':'🅗','I':'🅘',
-      'J':'🅙','K':'🅚','L':'🅛','M':'🅜','N':'🅝','O':'🅞','P':'🅟','Q':'🅠','R':'🅡',
-      'S':'🅢','T':'🅣','U':'🅤','V':'🅥','W':'🅦','X':'🅧','Y':'🅨','Z':'🅩'
-    };
+    const inputEl = document.getElementById('cipher');
+    const shiftEl = document.getElementById('shift');
+    const shiftValue = document.getElementById('shiftValue');
+    const outputEl = document.getElementById('output');
+    const decodeBtn = document.getElementById('decodeBtn');
+    const freqBtn = document.getElementById('freqBtn');
+    const freqResults = document.getElementById('freqResults');
 
-    const reversePigpen = Object.fromEntries(
-      Object.entries(pigpen).map(([k,v])=>[v,k])
-    );
+    function caesarDecode(text, shift) {
+      const A = 'A'.charCodeAt(0);
+      return [...text.toUpperCase()].map(ch => {
+        const code = ch.charCodeAt(0);
+        if (code >= 65 && code <= 90) {
+          const pos = (code - A - shift + 26) % 26;
+          return String.fromCharCode(A + pos);
+        }
+        return ch; // keep punctuation & spaces
+      }).join('');
+    }
 
-    function caesar(str, shift){
-      return str.replace(/[A-Z]/gi, c=>{
-        const base = c>='a' ? 'a'.charCodeAt(0) : 'A'.charCodeAt(0);
-        return String.fromCharCode((c.charCodeAt(0)-base+shift+26)%26 + base);
+    function doDecode() {
+      const shift = parseInt(shiftEl.value, 10);
+      outputEl.value = caesarDecode(inputEl.value, shift);
+    }
+
+    function frequency(text) {
+      const counts = Array(26).fill(0);
+      [...text.toUpperCase()].forEach(ch => {
+        const code = ch.charCodeAt(0);
+        if (code >= 65 && code <= 90) counts[code - 65]++;
       });
+      return counts;
     }
 
-    function encode(text){
-      return text.toUpperCase().replace(/[A-Z]/g, c=>pigpen[c] || c);
-    }
-
-    function decode(text){
-      return text.split(/\s+/).map(sym=>reversePigpen[sym] || sym).join('');
-    }
-
-    const modeSel = document.getElementById('mode');
-    const shiftInput = document.getElementById('shift');
-    const shiftLabel = document.getElementById('shiftLabel');
-
-    modeSel.addEventListener('change', () => {
-      shiftLabel.classList.toggle('hidden', modeSel.value !== 'decodeShift');
-    });
-
-    document.getElementById('run').addEventListener('click', () => {
-      const inp = document.getElementById('input').value.trim();
-      let result = '';
-      switch (modeSel.value) {
-        case 'encode':
-          result = encode(inp);
-          break;
-        case 'decode':
-          result = decode(inp);
-          break;
-        case 'decodeShift':
-          const decoded = decode(inp);
-          const shift = parseInt(shiftInput.value) || 0;
-          result = caesar(decoded, shift);
-          break;
+    function showFreq() {
+      const counts = frequency(inputEl.value);
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      const pairs = letters.map((l,i)=>({l, count: counts[i]}));
+      pairs.sort((a,b)=>b.count-a.count);
+      const most = pairs[0];
+      let guessShift = null;
+      if (most.count > 0) {
+        const assumedEIndex = 'E'.charCodeAt(0) - 65;
+        guessShift = (most.l.charCodeAt(0) - 65 - assumedEIndex + 26) % 26;
       }
-      document.getElementById('out').textContent = result;
+      let lines = pairs.filter(p=>p.count>0).map(p=>`${p.l}: ${p.count}`).join('\n');
+      if (guessShift !== null) {
+        lines += `\n\n🤖 My best guess: try shift ${guessShift}`;
+      }
+      freqResults.textContent = lines || 'No letters to analyse yet!';
+    }
+
+    // hook up events
+    shiftEl.addEventListener('input', () => {
+      shiftValue.textContent = shiftEl.value;
+      doDecode(); // live preview
     });
+    decodeBtn.addEventListener('click', doDecode);
+    freqBtn.addEventListener('click', showFreq);
   </script>
 </body>
 </html>
